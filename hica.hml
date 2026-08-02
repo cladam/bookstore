@@ -1,0 +1,18 @@
+@project {
+    name: "bookshop"
+    version: "0.1.0"
+    license: "MIT"
+    entry: "src/main.hc"
+}
+
+@dependencies {
+    sqlite: "latest"
+    imgui: "latest"
+}
+
+@description {
+    summary: "Elsewhere Bookshop Inventory - EBI"
+    author: "cladam"
+    homepage: "https://elsewhere.io"
+    repository: "https://github.com/cladam/bookshop/"
+}

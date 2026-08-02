@@ -1,0 +1,11 @@
+# hica.lock — auto-generated, do not edit
+
+[[package]]
+name = "sqlite"
+version = "latest"
+source = "registry+pkg.hica.dev@latest"
+
+[[package]]
+name = "imgui"
+version = "latest"
+source = "registry+pkg.hica.dev@latest"
