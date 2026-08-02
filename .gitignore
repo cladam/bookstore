@@ -1,2 +1,17 @@
 .koka
 docs/*
+
+examples/*
+!examples/*.hc
+
+src/*
+!src/*.hc
+
+tests/*
+!tests/*.hc
+!tests/*.hml
+
+hica-tbdflow.md
+
+# tbdflow intent log (local-only, never committed)
+.tbdflow-intent.json

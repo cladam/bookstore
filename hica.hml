@@ -8,6 +8,11 @@
 @dependencies {
     sqlite: "latest"
     imgui: "latest"
+    csv: "latest"
+}
+
+@koka {
+    flags: "--cclib=sqlite3 --cclinkopts=-L./vendor/imgui/lib --cclinkopts=-L/opt/homebrew/opt/sdl2/lib --cclib=imgui_hica --cclib=SDL2 --cclinkopts=-lc++ --cclinkopts=-framework --cclinkopts=OpenGL"
 }
 
 @description {
