@@ -29,6 +29,79 @@ fun normalize_title(s: string) : string {
   to_lower(from_chars(filtered))
 }
 
+// Skip Google Docs CSV metadata lines
+fun skip_metadata(content: string) : string {
+  unlines(drop(lines(content), 2))
+}
+
+// Import real CSV datasets from Docs
+fun import_real_data(db) : string {
+  match read_file("docs/Inventory - Current Inventory.csv") {
+    Err(e) => "Error reading inventory CSV: " + e,
+    Ok(inv_text) => {
+      let clean_inv = skip_metadata(inv_text)
+      let t_inv = csv_parse(clean_inv)
+      for row in t_inv.rows {
+        let title = match str_at(row, 0) { None => "", Some(s) => s }
+        if title != "" {
+          let author = match str_at(row, 1) { None => "", Some(s) => s }
+          let distributor = match str_at(row, 2) { None => "", Some(s) => s }
+          let section = match str_at(row, 3) { None => "", Some(s) => s }
+          let barcode = match str_at(row, 5) { None => "", Some(s) => s }
+          let retail_price = match str_at(row, 6) { None => "0.0", Some(s) => s }
+          let purchase_cost = match str_at(row, 7) { None => "0.0", Some(s) => s }
+          let current_stock = match str_at(row, 8) { None => "0", Some(s) => s }
+          let first_stocked_date = match str_at(row, 10) { None => "", Some(s) => s }
+          let mk = normalize_title(title)
+          let stock_val = match parse_float(current_stock) {
+            None => 0.0,
+            Some(st) => match parse_float(purchase_cost) {
+              None => 0.0,
+              Some(co) => st * co
+            }
+          }
+
+          let sql = "INSERT INTO inventory (title, author, distributor, section, barcode, retail_price, purchase_cost, current_stock, stock_value, first_stocked_date, match_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(match_key) DO UPDATE SET current_stock=excluded.current_stock, stock_value=excluded.stock_value, first_stocked_date=excluded.first_stocked_date"
+          let _ = sqlite_exec_p(db, sql, [
+            param(title), param(author), param(distributor), param(section),
+            param(barcode), param(retail_price), param(purchase_cost), param(current_stock),
+            param(show(stock_val)), param(first_stocked_date), param(mk)
+          ])
+          ()
+        } else {
+          ()
+        }
+      }
+
+      match read_file("docs/Inventory - Sales History.csv") {
+        Err(e) => "Inventory imported, but error reading sales history CSV: " + e,
+        Ok(sales_text) => {
+          let clean_sales = skip_metadata(sales_text)
+          let t_sales = csv_parse(clean_sales)
+          for row in t_sales.rows {
+            let m = match str_at(row, 0) { None => "", Some(s) => s }
+            let title = match str_at(row, 1) { None => "", Some(s) => s }
+            if m != "" && title != "" {
+              let net_units = match str_at(row, 9) { None => "0", Some(s) => s }
+              let sales_incl_vat = match str_at(row, 12) { None => "0.0", Some(s) => s }
+              let mk = normalize_title(title)
+
+              let sql = "INSERT INTO sales_history (sales_month, title, net_units, sales_incl_vat, match_key) VALUES (?, ?, ?, ?, ?)"
+              let _ = sqlite_exec_p(db, sql, [
+                param(m), param(title), param(net_units), param(sales_incl_vat), param(mk)
+              ])
+              ()
+            } else {
+              ()
+            }
+          }
+          "Successfully loaded actual database with full current inventory and sales history records!"
+        }
+      }
+    }
+  }
+}
+
 // Database schema initialization
 fun init_db(db) {
   let _ = sqlite_exec(db, "CREATE TABLE IF NOT EXISTS inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, author TEXT, distributor TEXT, section TEXT, sku TEXT, barcode TEXT, retail_price REAL, purchase_cost REAL, current_stock INTEGER, stock_value REAL, first_stocked_date TEXT, match_key TEXT UNIQUE)")
@@ -389,6 +462,15 @@ fun main() {
           monthly_budget = gui_slider_float("Monthly Budget (SEK)", 1000.0, 100000.0, monthly_budget)
           replenishment_pct = gui_slider_float("Replenishment Share (%)", 0.0, 100.0, replenishment_pct)
           discovery_pct = gui_slider_float("Discovery Share (%)", 0.0, 100.0, discovery_pct)
+
+          gui_spacing()
+          gui_separator()
+          gui_text_colored("Load Local Datasets from docs/", 0.3, 0.8, 1.0, 1.0)
+          gui_spacing()
+          gui_text_wrapped("Directly import actual, clean current inventory and sales history CSV files downloaded from your friend's Google Docs.")
+          if gui_button("Import Actual Google Docs CSVs") {
+            csv_status_message = import_real_data(db)
+          }
 
           gui_spacing()
           gui_separator()
