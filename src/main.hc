@@ -1,6 +1,7 @@
 import "sqlite"
 import "imgui"
 import "csv"
+import "./bookstore-ui_theme"
 
 struct SeedBook {
   title: string,
@@ -186,6 +187,7 @@ fun main() {
     var csv_status_message = ""
 
     gui_window("Elsewhere Booksellers — EBI Inventory System", 1000, 700, () => {
+      apply_one_dark_theme()
       // Top Status Bar / Welcome
       gui_text_colored("Elsewhere Booksellers — Inventory System (EBI) Prototype", 0.3, 0.8, 1.0, 1.0)
       gui_separator()

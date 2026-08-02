@@ -6,6 +6,7 @@ import std/num/float64
 import sqlite
 import imgui
 import csv
+import bookstore-ui_theme
 
 import sqlite_ffi
 import imgui_ffi
@@ -244,20 +245,20 @@ fun hc_center(s : string, width : int, ch : string)
 fun hc_removeprefix(s : string, pre : string) : string
   if s.starts-with(pre).is-just then s.list.drop(pre.count).string else s
 
-// .hc:24
+// .hc:25
 fun hc_normalize_title(s : string) : string
   val cs : list<char> = s.string/list
   val filtered : list<char> = filter(cs, hc_is_alnum)
   filtered.string.to-lower
 
-// .hc:31
+// .hc:32
 fun hc_init_db(db : db)
   val _ : either<sqliteerror, bool> = hc_sqlite_exec(db, "CREATE TABLE IF NOT EXISTS inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, author TEXT, distributor TEXT, section TEXT, sku TEXT, barcode TEXT, retail_price REAL, purchase_cost REAL, current_stock INTEGER, stock_value REAL, first_stocked_date TEXT, match_key TEXT UNIQUE)")
   val _ : either<sqliteerror, bool> = hc_sqlite_exec(db, "CREATE TABLE IF NOT EXISTS sales_history (id INTEGER PRIMARY KEY AUTOINCREMENT, sales_month TEXT NOT NULL, title TEXT NOT NULL, net_units INTEGER, sales_incl_vat REAL, match_key TEXT)")
   val _ : either<sqliteerror, bool> = hc_sqlite_exec(db, "CREATE TABLE IF NOT EXISTS overrides (match_key TEXT PRIMARY KEY, status_override TEXT, manual_target INTEGER, is_hard_to_source INTEGER, always_reorder INTEGER)")
   ()
 
-// .hc:40
+// .hc:41
 fun hc_seed_data_if_empty(db : db)
   match hc_sqlite_query(db, "SELECT COUNT(*) FROM inventory")
     Left(_) ->
@@ -304,7 +305,7 @@ fun hc_seed_data_if_empty(db : db)
         ()
       ()
 
-// .hc:117
+// .hc:118
 fun hc_get_total_stock_value(db : db)
   match hc_sqlite_query(db, "SELECT SUM(stock_value) FROM inventory")
     Left(_) ->
@@ -324,7 +325,7 @@ fun hc_get_total_stock_value(db : db)
                 Just(f) ->
                   f
 
-// .hc:129
+// .hc:130
 fun hc_get_total_items(db : db)
   match hc_sqlite_query(db, "SELECT SUM(current_stock) FROM inventory")
     Left(_) ->
@@ -340,7 +341,7 @@ fun hc_get_total_items(db : db)
             Just(v) ->
               v
 
-// .hc:142
+// .hc:143
 fun hc_get_total_titles(db : db)
   match hc_sqlite_query(db, "SELECT COUNT(*) FROM inventory")
     Left(_) ->
@@ -356,7 +357,7 @@ fun hc_get_total_titles(db : db)
             Just(v) ->
               v
 
-// .hc:155
+// .hc:156
 fun hc_get_sleeper_count(db : db)
   val sql : string = "SELECT COUNT(*) FROM inventory i LEFT JOIN sales_history s ON i.match_key = s.match_key WHERE i.current_stock > 0 AND s.match_key IS NULL"
   match hc_sqlite_query(db, sql)
@@ -373,7 +374,7 @@ fun hc_get_sleeper_count(db : db)
             Just(v) ->
               v
 
-// .hc:170
+// .hc:171
 fun main()
   val _ : either<sqliteerror, bool> =
     hc_with_sqlite("elsewhere_inventory.db") fn(db)
@@ -386,6 +387,7 @@ fun main()
       var csv_input_sales : string := ""
       var csv_status_message : string := ""
       hc_gui_window("Elsewhere Booksellers — EBI Inventory System", 1000, 700) fn()
+        hc_apply_one_dark_theme()
         gui_text_colored("Elsewhere Booksellers — Inventory System (EBI) Prototype", 0.3, 0.8, 1.0, 1.0)
         gui_separator()
         hc_gui_tab_bar("##main_tabs") fn()
