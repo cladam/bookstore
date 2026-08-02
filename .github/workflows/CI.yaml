@@ -41,14 +41,6 @@ jobs:
           curl -fsSL https://www.hica.dev/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Install Hica (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          curl -fsSL -o "$env:TEMP\install-hica.ps1" https://www.hica.dev/install.ps1
-          & "$env:TEMP\install-hica.ps1"
-          "$env:LOCALAPPDATA\hica" | Out-File -Append -FilePath $env:GITHUB_PATH
-
       - name: Verify tools
         run: |
           koka --version
@@ -57,7 +49,6 @@ jobs:
 
       - name: Run tests
         shell: bash
-        continue-on-error: ${{ runner.os == 'Windows' }}
         run: |
           set +e
           for f in tests/test_*.hc; do 
@@ -72,10 +63,10 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            artifact: tbdflow-ui-macos-arm64
+            artifact: bookstore-ui-macos-arm64
             imgui_asset: libimgui_hica-macos-arm64.a
           - os: ubuntu-latest
-            artifact: tbdflow-ui-linux-x86_64
+            artifact: bookstore-ui-linux-x86_64
             imgui_asset: libimgui_hica-linux-x86_64.a
     runs-on: ${{ matrix.os }}
     steps:
@@ -112,14 +103,14 @@ jobs:
           sed -i 's|--cclinkopts=-lc++|--cclinkopts=-lstdc++|g' hica.hml
 
       - name: Build binary
-        run: hica build -o tbdflow-ui
+        run: hica build -o EBI
 
       - name: Ad-hoc codesign (macOS)
         if: runner.os == 'macOS'
-        run: codesign --sign - --force tbdflow-ui
+        run: codesign --sign - --force EBI
 
       - name: Package
-        run: tar czf ${{ matrix.artifact }}.tar.gz tbdflow-ui
+        run: tar czf ${{ matrix.artifact }}.tar.gz EBI
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
