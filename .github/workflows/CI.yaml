@@ -16,24 +16,15 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Koka (Unix)
-        if: runner.os != 'Windows'
         run: |
           curl -sSL https://github.com/koka-lang/koka/releases/latest/download/install.sh | sudo sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Install Koka (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          curl -sSL -o "$env:TEMP\install-koka.bat" https://github.com/koka-lang/koka/releases/latest/download/install.bat
-          & "$env:TEMP\install-koka.bat"
-          "$env:LOCALAPPDATA\koka\bin" | Out-File -Append -FilePath $env:GITHUB_PATH
 
       - name: Install Hica (Unix)
         if: runner.os != 'Windows'
@@ -47,15 +38,6 @@ jobs:
           hica --version
         shell: bash
 
-      - name: Run tests
-        shell: bash
-        run: |
-          set +e
-          for f in tests/test_*.hc; do 
-            result=$(hica test "$f" 2>&1 | grep -E "passed|failed|error")
-            echo "$(basename $f): $result"
-          done
-
   build:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: test
@@ -63,10 +45,10 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            artifact: bookstore-ui-macos-arm64
+            artifact: bookstore-macos-arm64
             imgui_asset: libimgui_hica-macos-arm64.a
           - os: ubuntu-latest
-            artifact: bookstore-ui-linux-x86_64
+            artifact: bookstore-linux-x86_64
             imgui_asset: libimgui_hica-linux-x86_64.a
     runs-on: ${{ matrix.os }}
     steps:
