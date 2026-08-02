@@ -95,7 +95,68 @@ fun import_real_data(db) : string {
               ()
             }
           }
-          "Successfully loaded actual database with full current inventory and sales history records!"
+
+          // 3. Import Core Stock Overrides CSV
+          match read_file("docs/Inventory - Core Stock Overrides.csv") {
+            Err(_) => { () },
+            Ok(over_text) => {
+              let clean_over = skip_metadata(over_text)
+              let t_over = csv_parse(clean_over)
+              for row in t_over.rows {
+                let title = match str_at(row, 0) { None => "", Some(s) => s }
+                if title != "" {
+                  let status = match str_at(row, 2) { None => "", Some(s) => s }
+                  let target = match str_at(row, 3) { None => "0", Some(s) => s }
+                  let hard_val = match str_at(row, 4) { None => "No", Some(s) => s }
+                  let hard = if hard_val == "Yes" { "1" } else { "0" }
+                  let always_val = match str_at(row, 5) { None => "No", Some(s) => s }
+                  let always = if always_val == "Yes" { "1" } else { "0" }
+                  let mk = normalize_title(title)
+
+                  let sql = "INSERT INTO overrides (match_key, status_override, manual_target, is_hard_to_source, always_reorder) VALUES (?, ?, ?, ?, ?) ON CONFLICT(match_key) DO UPDATE SET status_override=excluded.status_override, manual_target=excluded.manual_target, is_hard_to_source=excluded.is_hard_to_source, always_reorder=excluded.always_reorder"
+                  let _ = sqlite_exec_p(db, sql, [
+                    param(mk), param(status), param(target), param(hard), param(always)
+                  ])
+                  ()
+                } else {
+                  ()
+                }
+              }
+              ()
+            }
+          }
+
+          // 4. Import Event Titles CSV
+          match read_file("docs/Inventory - Event Titles.csv") {
+            Err(_) => { () },
+            Ok(evt_text) => {
+              let clean_evt = skip_metadata(evt_text)
+              let t_evt = csv_parse(clean_evt)
+              for row in t_evt.rows {
+                let title = match str_at(row, 0) { None => "", Some(s) => s }
+                if title != "" {
+                  let m = match str_at(row, 2) { None => "", Some(s) => s }
+                  let name = match str_at(row, 3) { None => "", Some(s) => s }
+                  let excl_val = match str_at(row, 4) { None => "No", Some(s) => s }
+                  let excl = if excl_val == "Yes" { "1" } else { "0" }
+                  let active_val = match str_at(row, 6) { None => "No", Some(s) => s }
+                  let active = if active_val == "Yes" { "1" } else { "0" }
+                  let mk = normalize_title(title)
+
+                  let sql = "INSERT INTO event_titles (match_key, event_month, event_name, exclude_core_fast, active) VALUES (?, ?, ?, ?, ?) ON CONFLICT(match_key) DO UPDATE SET event_month=excluded.event_month, event_name=excluded.event_name, exclude_core_fast=excluded.exclude_core_fast, active=excluded.active"
+                  let _ = sqlite_exec_p(db, sql, [
+                    param(mk), param(m), param(name), param(excl), param(active)
+                  ])
+                  ()
+                } else {
+                  ()
+                }
+              }
+              ()
+            }
+          }
+
+          "Successfully loaded actual database with full current inventory, sales history, overrides and event titles records!"
         }
       }
     }
@@ -109,6 +170,8 @@ fun init_db(db) {
   let _ = sqlite_exec(db, "CREATE TABLE IF NOT EXISTS sales_history (id INTEGER PRIMARY KEY AUTOINCREMENT, sales_month TEXT NOT NULL, title TEXT NOT NULL, net_units INTEGER, sales_incl_vat REAL, match_key TEXT)")
 
   let _ = sqlite_exec(db, "CREATE TABLE IF NOT EXISTS overrides (match_key TEXT PRIMARY KEY, status_override TEXT, manual_target INTEGER, is_hard_to_source INTEGER, always_reorder INTEGER)")
+
+  let _ = sqlite_exec(db, "CREATE TABLE IF NOT EXISTS event_titles (match_key TEXT PRIMARY KEY, event_month TEXT, event_name TEXT, exclude_core_fast INTEGER, active INTEGER)")
 }
 
 // Safe seeding of realistic data if DB is empty
@@ -555,6 +618,29 @@ fun main() {
             gui_spacing()
             gui_text_colored(csv_status_message, 0.2, 0.9, 0.2, 1.0)
           }
+        })
+
+        // ----------------- TAB 5: INSTRUCTIONS -----------------
+        gui_tab("Instructions", () => {
+          gui_spacing()
+          gui_text_colored("EBI Streamlined Buying Workflow & Principles", 0.3, 0.8, 1.0, 1.0)
+          gui_separator()
+
+          gui_text_colored("Streamlined Operational Steps:", 0.2, 0.8, 0.4, 1.0)
+          gui_bullet_text("1. Load actual Google Docs CSV data under 'Settings & Import' tab via single click.")
+          gui_bullet_text("2. Configure your Monthly Budget and Replenishment allocations interactively.")
+          gui_bullet_text("3. Place proven replenishment orders first using the live 'Order List' recommendations.")
+          gui_bullet_text("4. Manage aging sleeper titles directly inside 'Sleeper Review' using actionable drop-downs.")
+          gui_bullet_text("5. Everything recalculates instantly and persists into your type-safe SQLite database.")
+
+          gui_spacing()
+          gui_separator()
+
+          gui_text_colored("Elsewhere Buying Principles (Enforced by EBI):", 0.2, 0.8, 0.4, 1.0)
+          gui_bullet_text("Discovery Stock: One or two copies selling is healthy, not a failure.")
+          gui_bullet_text("Replenishment: Review sold-out titles before browsing new catalogues.")
+          gui_bullet_text("Sleeper: Zero-sales books with 2+ copies after 180+ days require action.")
+          gui_bullet_text("Expensive Stock: Untested books retailing > 500 SEK should normally start with only 1 copy.")
         })
       })
     })
