@@ -391,7 +391,7 @@ fun main() {
           group_classics = gui_checkbox("Group and Roll-up Classics & Variants by Title", group_classics)
           gui_same_line()
           if gui_button("Previous Page") {
-            if order_page != 0 { order_page = order_page - 1 }
+            order_page = clamp(order_page - 1, 0, order_page)
           }
           gui_same_line()
           gui_text("Page " + show(order_page + 1))
@@ -467,7 +467,7 @@ fun main() {
           group_classics = gui_checkbox("Group and Roll-up Classics & Variants by Title", group_classics)
           gui_same_line()
           if gui_button("Prev Page") {
-            if sleeper_page != 0 { sleeper_page = sleeper_page - 1 }
+            sleeper_page = clamp(sleeper_page - 1, 0, sleeper_page)
           }
           gui_same_line()
           gui_text("Page " + show(sleeper_page + 1))
