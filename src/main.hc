@@ -321,6 +321,9 @@ fun main() {
     var csv_input_inventory = ""
     var csv_input_sales = ""
     var csv_status_message = ""
+    var group_classics = true
+    var order_page = 0
+    var sleeper_page = 0
 
     gui_window("Elsewhere Booksellers — EBI Inventory System", 1000, 700, () => {
       apply_one_dark_theme()
@@ -385,11 +388,28 @@ fun main() {
         // ----------------- TAB 2: ORDER LIST -----------------
         gui_tab("Order List", () => {
           gui_spacing()
+          group_classics = gui_checkbox("Group and Roll-up Classics & Variants by Title", group_classics)
+          gui_same_line()
+          if gui_button("Previous Page") {
+            if order_page != 0 { order_page = order_page - 1 }
+          }
+          gui_same_line()
+          gui_text("Page " + show(order_page + 1))
+          gui_same_line()
+          if gui_button("Next Page") {
+            order_page = order_page + 1
+          }
+          gui_spacing()
           gui_text("Recommended Replenishment Orders (Calculated on stock levels & overrides)")
           gui_separator()
 
           // Query items that are out of stock (current_stock <= 0) or flagged as always_reorder
-          let sql = "SELECT i.title, i.author, i.current_stock, i.purchase_cost, o.status_override, i.match_key FROM inventory i LEFT JOIN overrides o ON i.match_key = o.match_key WHERE i.current_stock <= 0 OR (o.always_reorder = 1 AND i.current_stock < 2)"
+          let base_sql = if group_classics {
+            "SELECT MAX(i.title) as title, MAX(i.author) as author, SUM(i.current_stock) as current_stock, AVG(i.purchase_cost) as purchase_cost, MAX(o.status_override) as status_override, i.match_key FROM inventory i LEFT JOIN overrides o ON i.match_key = o.match_key GROUP BY i.match_key HAVING SUM(i.current_stock) <= 0 OR (MAX(o.always_reorder) = 1 AND SUM(i.current_stock) < 2)"
+          } else {
+            "SELECT i.title, i.author, i.current_stock, i.purchase_cost, o.status_override, i.match_key FROM inventory i LEFT JOIN overrides o ON i.match_key = o.match_key WHERE i.current_stock <= 0 OR (o.always_reorder = 1 AND i.current_stock < 2)"
+          }
+          let sql = base_sql + " LIMIT 50 OFFSET " + show(order_page * 50)
 
           match sqlite_query(db, sql) {
             Err(e) => gui_text_colored("Database error: " + e.message, 1.0, 0.3, 0.3, 1.0),
@@ -444,11 +464,28 @@ fun main() {
         // ----------------- TAB 3: SLEEPER REVIEW -----------------
         gui_tab("Sleeper Review", () => {
           gui_spacing()
+          group_classics = gui_checkbox("Group and Roll-up Classics & Variants by Title", group_classics)
+          gui_same_line()
+          if gui_button("Prev Page") {
+            if sleeper_page != 0 { sleeper_page = sleeper_page - 1 }
+          }
+          gui_same_line()
+          gui_text("Page " + show(sleeper_page + 1))
+          gui_same_line()
+          if gui_button("Next Page") {
+            sleeper_page = sleeper_page + 1
+          }
+          gui_spacing()
           gui_text("Sleeper Titles (Stock present, but no recent monthly sales detected)")
           gui_separator()
 
           // Query stock with zero sales
-          let sql = "SELECT i.title, i.author, i.current_stock, i.first_stocked_date, o.status_override, i.match_key FROM inventory i LEFT JOIN sales_history s ON i.match_key = s.match_key LEFT JOIN overrides o ON i.match_key = o.match_key WHERE i.current_stock > 0 AND s.match_key IS NULL"
+          let base_sql = if group_classics {
+            "SELECT MAX(i.title) as title, MAX(i.author) as author, SUM(i.current_stock) as current_stock, MAX(i.first_stocked_date) as first_stocked_date, MAX(o.status_override) as status_override, i.match_key FROM inventory i LEFT JOIN sales_history s ON i.match_key = s.match_key LEFT JOIN overrides o ON i.match_key = o.match_key WHERE i.current_stock > 0 AND s.match_key IS NULL GROUP BY i.match_key"
+          } else {
+            "SELECT i.title, i.author, i.current_stock, i.first_stocked_date, o.status_override, i.match_key FROM inventory i LEFT JOIN sales_history s ON i.match_key = s.match_key LEFT JOIN overrides o ON i.match_key = o.match_key WHERE i.current_stock > 0 AND s.match_key IS NULL"
+          }
+          let sql = base_sql + " LIMIT 50 OFFSET " + show(sleeper_page * 50)
 
           match sqlite_query(db, sql) {
             Err(e) => gui_text_colored("Database error: " + e.message, 1.0, 0.3, 0.3, 1.0),
@@ -487,7 +524,7 @@ fun main() {
                     // We render a select combo
                     let combo_items = "No Action\nMerchandise\nDiscount\nDo Not Reorder\nAlways Reorder"
                     let selected = gui_combo("##action_" + mk, combo_items, 0)
-                    if selected > 0 {
+                    if selected != 0 {
                       let new_status = match selected {
                         1 => "Merchandise",
                         2 => "Discount",
