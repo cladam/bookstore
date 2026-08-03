@@ -83,7 +83,8 @@ jobs:
 
       - name: Download imgui library
         run: |
-          curl -fsSL -o lib/libimgui_hica.a \
+          mkdir -p vendor/imgui/lib
+          curl -fsSL -o vendor/imgui/lib/libimgui_hica.a \
             https://github.com/cladam/imgui/releases/latest/download/${{ matrix.imgui_asset }}
 
       - name: Patch link flags for Linux
