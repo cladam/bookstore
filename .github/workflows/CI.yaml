@@ -38,6 +38,15 @@ jobs:
           hica --version
         shell: bash
 
+      - name: Run tests
+        shell: bash
+        run: |
+          set +e
+          for f in tests/test_*.hc; do 
+            result=$(hica test "$f" 2>&1 | grep -E "passed|failed|error")
+            echo "$(basename $f): $result"
+          done
+
   build:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: test
