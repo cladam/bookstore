@@ -156,7 +156,9 @@ fun import_real_data(db) : string {
             }
           }
 
-          "Successfully loaded actual database with full current inventory, sales history, overrides and event titles records!"
+          clear_arrived_orders(db)
+
+          "Successfully loaded actual database with full current inventory, sales history, overrides, event titles, and auto-reconciled orders!"
         }
       }
     }
@@ -172,6 +174,13 @@ fun init_db(db) {
   let _ = sqlite_exec(db, "CREATE TABLE IF NOT EXISTS overrides (match_key TEXT PRIMARY KEY, status_override TEXT, manual_target INTEGER, is_hard_to_source INTEGER, always_reorder INTEGER)")
 
   let _ = sqlite_exec(db, "CREATE TABLE IF NOT EXISTS event_titles (match_key TEXT PRIMARY KEY, event_month TEXT, event_name TEXT, exclude_core_fast INTEGER, active INTEGER)")
+
+  let _ = sqlite_exec(db, "CREATE TABLE IF NOT EXISTS orders (match_key TEXT PRIMARY KEY, order_qty INTEGER, ordered_date TEXT)")
+}
+
+// Automatically reconcile and clear arrived orders
+fun clear_arrived_orders(db) {
+  let _ = sqlite_exec(db, "DELETE FROM orders WHERE match_key IN (SELECT match_key FROM inventory WHERE current_stock > 0)")
 }
 
 // Safe seeding of realistic data if DB is empty
@@ -252,7 +261,7 @@ fun seed_data_if_empty(db) {
 }
 
 // Load metric statistics from SQLite
-fun get_total_stock_value(db) : float {
+fun get_total_stock_value(db) {
   match sqlite_query(db, "SELECT SUM(stock_value) FROM inventory") {
     Err(_) => 0.0,
     Ok(res) => match res.rows {
@@ -268,7 +277,7 @@ fun get_total_stock_value(db) : float {
   }
 }
 
-fun get_total_items(db) : int {
+fun get_total_items(db) {
   match sqlite_query(db, "SELECT SUM(current_stock) FROM inventory") {
     Err(_) => 0,
     Ok(res) => match res.rows {
@@ -281,7 +290,7 @@ fun get_total_items(db) : int {
   }
 }
 
-fun get_total_titles(db) : int {
+fun get_total_titles(db) {
   match sqlite_query(db, "SELECT COUNT(*) FROM inventory") {
     Err(_) => 0,
     Ok(res) => match res.rows {
@@ -294,7 +303,7 @@ fun get_total_titles(db) : int {
   }
 }
 
-fun get_sleeper_count(db) : int {
+fun get_sleeper_count(db) {
   // Mock Sleeper logic: stock > 0 but 0 sales in sales_history
   let sql = "SELECT COUNT(*) FROM inventory i LEFT JOIN sales_history s ON i.match_key = s.match_key WHERE i.current_stock > 0 AND s.match_key IS NULL"
   match sqlite_query(db, sql) {
@@ -313,6 +322,7 @@ fun main() {
   let _ = with_sqlite("elsewhere_inventory.db", (db) => {
     init_db(db)
     seed_data_if_empty(db)
+    clear_arrived_orders(db)
 
     // Reactive State
     var monthly_budget = 30000.0
@@ -329,6 +339,7 @@ fun main() {
       apply_one_dark_theme()
       // Top Status Bar / Welcome
       gui_text_colored("Elsewhere Booksellers — Inventory System (EBI) Prototype", 0.3, 0.8, 1.0, 1.0)
+      group_classics = gui_checkbox("Group and Roll-up Classics & Variants by Title", group_classics)
       gui_separator()
 
       gui_tab_bar("##main_tabs", () => {
@@ -399,15 +410,27 @@ fun main() {
           if gui_button("Next Page") {
             order_page = order_page + 1
           }
+          gui_same_line()
+          let mark_clicked = gui_button("Mark Page as Ordered")
+          if mark_clicked {
+            let base_sql_for_insert = if group_classics {
+              "SELECT i.match_key FROM inventory i LEFT JOIN overrides o ON i.match_key = o.match_key LEFT JOIN orders ord ON i.match_key = ord.match_key WHERE ord.match_key IS NULL GROUP BY i.match_key HAVING SUM(i.current_stock) <= 0 OR (MAX(o.always_reorder) = 1 AND SUM(i.current_stock) < 2)"
+            } else {
+              "SELECT i.match_key FROM inventory i LEFT JOIN overrides o ON i.match_key = o.match_key LEFT JOIN orders ord ON i.match_key = ord.match_key WHERE (i.current_stock <= 0 OR (o.always_reorder = 1 AND i.current_stock < 2)) AND ord.match_key IS NULL"
+            }
+            let sql_insert = "INSERT OR IGNORE INTO orders (match_key, order_qty) SELECT match_key, 2 FROM (" + base_sql_for_insert + " LIMIT 50 OFFSET " + show(order_page * 50) + ")"
+            let _ = sqlite_exec(db, sql_insert)
+            gui_spacing()
+          }
           gui_spacing()
           gui_text("Recommended Replenishment Orders (Calculated on stock levels & overrides)")
           gui_separator()
 
           // Query items that are out of stock (current_stock <= 0) or flagged as always_reorder
           let base_sql = if group_classics {
-            "SELECT MAX(i.title) as title, MAX(i.author) as author, SUM(i.current_stock) as current_stock, AVG(i.purchase_cost) as purchase_cost, MAX(o.status_override) as status_override, i.match_key FROM inventory i LEFT JOIN overrides o ON i.match_key = o.match_key GROUP BY i.match_key HAVING SUM(i.current_stock) <= 0 OR (MAX(o.always_reorder) = 1 AND SUM(i.current_stock) < 2)"
+            "SELECT MAX(i.title) as title, MAX(i.author) as author, SUM(i.current_stock) as current_stock, AVG(i.purchase_cost) as purchase_cost, MAX(o.status_override) as status_override, i.match_key FROM inventory i LEFT JOIN overrides o ON i.match_key = o.match_key LEFT JOIN orders ord ON i.match_key = ord.match_key WHERE ord.match_key IS NULL GROUP BY i.match_key HAVING SUM(i.current_stock) <= 0 OR (MAX(o.always_reorder) = 1 AND SUM(i.current_stock) < 2)"
           } else {
-            "SELECT i.title, i.author, i.current_stock, i.purchase_cost, o.status_override, i.match_key FROM inventory i LEFT JOIN overrides o ON i.match_key = o.match_key WHERE i.current_stock <= 0 OR (o.always_reorder = 1 AND i.current_stock < 2)"
+            "SELECT i.title, i.author, i.current_stock, i.purchase_cost, o.status_override, i.match_key FROM inventory i LEFT JOIN overrides o ON i.match_key = o.match_key LEFT JOIN orders ord ON i.match_key = ord.match_key WHERE (i.current_stock <= 0 OR (o.always_reorder = 1 AND i.current_stock < 2)) AND ord.match_key IS NULL"
           }
           let sql = base_sql + " LIMIT 50 OFFSET " + show(order_page * 50)
 
@@ -459,13 +482,53 @@ fun main() {
               }
             }
           }
+
+          gui_spacing()
+          gui_separator()
+          gui_text_colored("Books Currently On Order:", 0.3, 0.8, 1.0, 1.0)
+          
+          match sqlite_query(db, "SELECT i.title, i.author, ord.order_qty, ord.match_key FROM orders ord JOIN inventory i ON ord.match_key = i.match_key") {
+            Err(_) => { gui_spacing() },
+            Ok(res_order) => {
+              if res_order.row_count == 0 {
+                gui_text("No books currently on order.")
+              } else {
+                if gui_begin_table("##on_order_table", 4, 67) {
+                  gui_table_setup_column("Cancel")
+                  gui_table_setup_column("Book Title")
+                  gui_table_setup_column("Author")
+                  gui_table_setup_column("Qty Ordered")
+                  gui_table_headers_row()
+
+                  for row in res_order.rows {
+                    gui_table_next_row()
+                    gui_table_next_column()
+                    let mk = match row_str(row, 3) { None => "", Some(s) => s }
+                    let clear_clicked = gui_button("Clear##" + mk)
+                    if clear_clicked {
+                      let _ = sqlite_exec_p(db, "DELETE FROM orders WHERE match_key = ?", [param(mk)])
+                      gui_spacing()
+                    }
+
+                    gui_table_next_column()
+                    gui_text(match row_str(row, 0) { None => "", Some(s) => s })
+
+                    gui_table_next_column()
+                    gui_text(match row_str(row, 1) { None => "Unknown", Some(s) => s })
+
+                    gui_table_next_column()
+                    gui_text(match row_int(row, 2) { None => 0, Some(v) => v } |> show)
+                  }
+                  gui_end_table()
+                }
+              }
+            }
+          }
         })
 
         // ----------------- TAB 3: SLEEPER REVIEW -----------------
         gui_tab("Sleeper Review", () => {
           gui_spacing()
-          group_classics = gui_checkbox("Group and Roll-up Classics & Variants by Title", group_classics)
-          gui_same_line()
           if gui_button("Prev Page") {
             sleeper_page = clamp(sleeper_page - 1, 0, sleeper_page)
           }
@@ -538,11 +601,8 @@ fun main() {
                       let _ = sqlite_exec_p(db, "INSERT INTO overrides (match_key, status_override, always_reorder) VALUES (?, ?, ?) ON CONFLICT(match_key) DO UPDATE SET status_override=excluded.status_override, always_reorder=excluded.always_reorder", [
                         param(mk), param(new_status), param(always_reorder_flag)
                       ])
-                      ()
-                    } else {
-                      ()
+                      gui_spacing()
                     }
-                    ()
                   }
 
                   gui_end_table()
@@ -612,9 +672,7 @@ fun main() {
                     param(barcode), param(retail_price), param(purchase_cost), param(current_stock),
                     param(show(stock_val)), param(first_stocked_date), param(mk)
                   ])
-                  ()
-                } else {
-                  ()
+                  gui_spacing()
                 }
               }
               csv_status_message = "Successfully processed " + show(processed_count) + " inventory records!"
@@ -642,9 +700,7 @@ fun main() {
                   let _ = sqlite_exec_p(db, sql, [
                     param(m), param(title), param(net_units), param(sales_incl_vat), param(mk)
                   ])
-                  ()
-                } else {
-                  ()
+                  gui_spacing()
                 }
               }
               csv_status_message = "Successfully appended " + show(processed_count) + " monthly sales records!"
