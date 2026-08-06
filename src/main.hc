@@ -176,7 +176,35 @@ fun init_db(db) {
   let _ = sqlite_exec(db, "CREATE TABLE IF NOT EXISTS event_titles (match_key TEXT PRIMARY KEY, event_month TEXT, event_name TEXT, exclude_core_fast INTEGER, active INTEGER)")
 
   let _ = sqlite_exec(db, "CREATE TABLE IF NOT EXISTS orders (match_key TEXT PRIMARY KEY, order_qty INTEGER, ordered_date TEXT)")
+
+  // Audit trail for manual stock adjustments (receipts, sales, corrections, damaged/lost)
+  let _ = sqlite_exec(db, "CREATE TABLE IF NOT EXISTS stock_adjustments (id INTEGER PRIMARY KEY AUTOINCREMENT, match_key TEXT NOT NULL, delta INTEGER NOT NULL, reason TEXT, adjusted_at TEXT DEFAULT CURRENT_TIMESTAMP)")
 }
+
+// Shared helper: upsert an inventory row from individual field values.
+// Behaviour: for a new match_key, inserts. For an existing match_key, ADDS the given
+// stock delta to the existing current_stock (so "adding" an existing ISBN acts like
+// receiving a new parcel rather than duplicating a row).
+fun upsert_inventory_row(db, title: string, author: string, distributor: string, section: string,
+                         barcode: string, retail_price: string, purchase_cost: string,
+                         current_stock: string, first_stocked_date: string) {
+  let mk = normalize_title(title)
+  let stock_val = match parse_float(current_stock) {
+    None => 0.0,
+    Some(st) => match parse_float(purchase_cost) {
+      None => 0.0,
+      Some(co) => st * co
+    }
+  }
+  let sql = "INSERT INTO inventory (title, author, distributor, section, barcode, retail_price, purchase_cost, current_stock, stock_value, first_stocked_date, match_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(match_key) DO UPDATE SET current_stock = inventory.current_stock + excluded.current_stock, stock_value = (inventory.current_stock + excluded.current_stock) * excluded.purchase_cost, retail_price = excluded.retail_price, purchase_cost = excluded.purchase_cost"
+  let _ = sqlite_exec_p(db, sql, [
+    param(title), param(author), param(distributor), param(section),
+    param(barcode), param(retail_price), param(purchase_cost), param(current_stock),
+    param(show(stock_val)), param(first_stocked_date), param(mk)
+  ])
+  ()
+}
+
 
 // Automatically reconcile and clear arrived orders
 fun clear_arrived_orders(db) {
@@ -334,6 +362,20 @@ fun main() {
     var group_classics = true
     var order_page = 0
     var sleeper_page = 0
+
+    // Manage Inventory tab — Add Book form state
+    var add_title = ""
+    var add_author = ""
+    var add_distributor = ""
+    var add_section = ""
+    var add_barcode = ""
+    var add_retail_price = ""
+    var add_purchase_cost = ""
+    var add_current_stock = ""
+    var add_first_stocked_date = ""
+    var add_status_message = ""
+    var add_status_ok = true
+
 
     gui_window("Elsewhere Booksellers — EBI Inventory System", 1000, 700, () => {
       apply_one_dark_theme()
@@ -713,8 +755,128 @@ fun main() {
           }
         })
 
-        // ----------------- TAB 5: INSTRUCTIONS -----------------
+        // ----------------- TAB 5: MANAGE INVENTORY -----------------
+        gui_tab("Manage Inventory", () => {
+          gui_spacing()
+          gui_text_colored("Add a New Book", 0.3, 0.8, 1.0, 1.0)
+          gui_text_wrapped("Type in a new title to add it to inventory. If the ISBN/title already exists, the entered stock count will be ADDED to the existing stock (like receiving a new parcel).")
+          gui_separator()
+          gui_spacing()
+
+          add_title = gui_input_text("Title *##add_title", 256)
+          add_author = gui_input_text("Author##add_author", 256)
+          add_distributor = gui_input_text("Distributor##add_distributor", 128)
+          add_section = gui_input_text("Section##add_section", 64)
+          add_barcode = gui_input_text("Barcode / ISBN##add_barcode", 32)
+          add_retail_price = gui_input_text("Retail Price (SEK)##add_retail", 16)
+          add_purchase_cost = gui_input_text("Purchase Cost (SEK)##add_cost", 16)
+          add_current_stock = gui_input_text("Copies to Add##add_stock", 8)
+          add_first_stocked_date = gui_input_text("First Stocked Date (YYYY-MM-DD)##add_date", 16)
+
+          gui_spacing()
+          if gui_button("Add Book") {
+            // Simple validation: title required, numeric fields must parse (or default)
+            if add_title == "" {
+              add_status_ok = false
+              add_status_message = "Title is required."
+            } else {
+              let retail = if add_retail_price == "" { "0.0" } else { add_retail_price }
+              let cost = if add_purchase_cost == "" { "0.0" } else { add_purchase_cost }
+              let stock = if add_current_stock == "" { "1" } else { add_current_stock }
+              // Basic numeric sanity checks
+              let retail_ok = match parse_float(retail) { None => false, Some(_) => true }
+              let cost_ok = match parse_float(cost) { None => false, Some(_) => true }
+              let stock_ok = match parse_float(stock) { None => false, Some(_) => true }
+              if !(retail_ok && cost_ok && stock_ok) {
+                add_status_ok = false
+                add_status_message = "Retail price, purchase cost, and copies must be numeric."
+              } else {
+                upsert_inventory_row(db,
+                  add_title, add_author, add_distributor, add_section,
+                  add_barcode, retail, cost, stock, add_first_stocked_date)
+
+                // Log the audit trail entry (store as the raw numeric string; SQLite will coerce)
+                let mk = normalize_title(add_title)
+                let _ = sqlite_exec_p(db,
+                  "INSERT INTO stock_adjustments (match_key, delta, reason) VALUES (?, ?, ?)",
+                  [param(mk), param(stock), param("Manual add / receive parcel")])
+
+
+                add_status_ok = true
+                add_status_message = "Saved '" + add_title + "' (+" + stock + " copies)."
+
+                // Reset form (keep distributor & section as they're often re-used)
+                add_title = ""
+                add_author = ""
+                add_barcode = ""
+                add_retail_price = ""
+                add_purchase_cost = ""
+                add_current_stock = ""
+                add_first_stocked_date = ""
+              }
+            }
+          }
+          gui_same_line()
+          if gui_button("Clear Form") {
+            add_title = ""
+            add_author = ""
+            add_distributor = ""
+            add_section = ""
+            add_barcode = ""
+            add_retail_price = ""
+            add_purchase_cost = ""
+            add_current_stock = ""
+            add_first_stocked_date = ""
+            add_status_message = ""
+          }
+
+          if add_status_message != "" {
+            gui_spacing()
+            if add_status_ok {
+              gui_text_colored(add_status_message, 0.2, 0.9, 0.2, 1.0)
+            } else {
+              gui_text_colored(add_status_message, 1.0, 0.4, 0.3, 1.0)
+            }
+          }
+
+          gui_spacing()
+          gui_separator()
+          gui_text_colored("Recent Manual Adjustments", 0.3, 0.8, 1.0, 1.0)
+          gui_spacing()
+          match sqlite_query(db, "SELECT sa.adjusted_at, i.title, sa.delta, sa.reason FROM stock_adjustments sa LEFT JOIN inventory i ON i.match_key = sa.match_key ORDER BY sa.id DESC LIMIT 10") {
+            Err(_) => { gui_text("(No adjustments yet.)") },
+            Ok(res) => {
+              if res.row_count == 0 {
+                gui_text("(No adjustments yet.)")
+              } else {
+                if gui_begin_table("##adj_table", 4, 67) {
+                  gui_table_setup_column("When")
+                  gui_table_setup_column("Book")
+                  gui_table_setup_column("Δ")
+                  gui_table_setup_column("Reason")
+                  gui_table_headers_row()
+                  for row in res.rows {
+                    gui_table_next_row()
+                    gui_table_next_column()
+                    gui_text(match row_str(row, 0) { None => "-", Some(s) => s })
+                    gui_table_next_column()
+                    gui_text(match row_str(row, 1) { None => "(unknown)", Some(s) => s })
+                    gui_table_next_column()
+                    let d = match row_int(row, 2) { None => 0, Some(v) => v }
+                    gui_text((if d >= 0 { "+" } else { "" }) + show(d))
+                    gui_table_next_column()
+                    gui_text(match row_str(row, 3) { None => "", Some(s) => s })
+                  }
+                  gui_end_table()
+                }
+              }
+            }
+          }
+        })
+
+        // ----------------- TAB 6: INSTRUCTIONS -----------------
         gui_tab("Instructions", () => {
+
           gui_spacing()
           gui_text_colored("EBI Streamlined Buying Workflow & Principles", 0.3, 0.8, 1.0, 1.0)
           gui_separator()
